@@ -6,6 +6,39 @@ import numpy as np
 import pickle
 import random
 import os
+# ==============================
+# ✅ Safe Save Wrapper for Colab
+# ==============================
+import os
+import shutil
+
+# مسیر خروجی در گوگل درایو
+drive_output_dir = "/content/drive/MyDrive/relformer_rgb/data/20cities"
+
+# اگر مسیر وجود ندارد، بسازش
+os.makedirs(drive_output_dir, exist_ok=True)
+
+def safe_save(local_path):
+    """ذخیره امن: اگر فایل قبلاً وجود دارد، رد می‌کند."""
+    # مسیر مقصد در گوگل درایو
+    file_name = os.path.basename(local_path)
+    drive_path = os.path.join(drive_output_dir, file_name)
+
+    # اگر فایل از قبل وجود دارد، رد کن
+    if os.path.exists(drive_path):
+        print(f"✅ Skipping existing file: {file_name}")
+        return True
+
+    # اگر فایل هنوز ساخته نشده در لوکال، صبر کن
+    if not os.path.exists(local_path):
+        print(f"⚠️ File not found locally: {local_path}")
+        return False
+
+    # کپی به گوگل درایو
+    shutil.copy(local_path, drive_path)
+    print(f"💾 Saved to Google Drive: {drive_path}")
+    return True
+
 
 patch_size = [128,128,1]
 pad = [5,5,0]
