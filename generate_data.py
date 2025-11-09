@@ -242,18 +242,107 @@ for x in range(180):
     if x % 20 == 8:
         indrange_test.append(x)
 
+# ---------------------------
+# Resume-safe main (replace original main with this block)
+# ---------------------------
+import pickle
+from pathlib import Path
+
+CHECKPOINT_FILE = "/content/drive/MyDrive/relformer_data/generate_checkpoint.pkl"
+
+def save_checkpoint(stage, data_index, image_id):
+    ck = {"stage": stage, "index": int(data_index), "image_id": int(image_id)}
+    try:
+        os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
+        with open(CHECKPOINT_FILE, "wb") as f:
+            pickle.dump(ck, f)
+    except Exception as e:
+        print(f"[WARN] could not save checkpoint: {e}")
+
+def load_checkpoint():
+    if os.path.exists(CHECKPOINT_FILE):
+        try:
+            with open(CHECKPOINT_FILE, "rb") as f:
+                ck = pickle.load(f)
+                return ck
+        except Exception as e:
+            print(f"[WARN] could not load checkpoint: {e}")
+            return None
+    return None
+
+def infer_image_id_from_folder(folder):
+    """اگر image_id قبلاً ساخته شده، از بزرگترین شماره فایل‌های raw استخراج کن."""
+    try:
+        p = Path(folder) / "raw"
+        if not p.exists():
+            return 1
+        files = list(p.glob("sample_*_data.png")) + list(p.glob("sample_*.png"))
+        if not files:
+            return 1
+        # پارس کردن شماره‌ها از نام فایل sample_000001_data.png
+        idxs = []
+        for f in files:
+            name = f.stem  # sample_000001_data
+            parts = name.split('_')
+            for part in parts:
+                if part.isdigit():
+                    idxs.append(int(part))
+                    break
+        if not idxs:
+            return 1
+        return max(idxs) + 1
+    except Exception as e:
+        print(f"[WARN] infer_image_id error: {e}")
+        return 1
+
 if __name__ == "__main__":
     root_dir = "./data/20cities/"
 
+    # load checkpoint if exists
+    ck = load_checkpoint()
+    # default start values
+    start_stage = None
+    start_index = None
     image_id = 1
+
+    # prepare index ranges (same as original)
+    indrange_train = []
+    indrange_test = []
+
+    for x in range(180):
+        if x % 10 < 8 :
+            indrange_train.append(x)
+        if x % 10 == 9:
+            indrange_test.append(x)
+        if x % 20 == 18:
+            indrange_train.append(x)
+        if x % 20 == 8:
+            indrange_test.append(x)
+
+    # -------------------------
+    # TRAIN stage
+    # -------------------------
     train_path = './data/20cities/train_data/'
-    if not os.path.isdir(train_path):
-        os.makedirs(train_path)
-        os.makedirs(train_path+'/seg')
-        os.makedirs(train_path+'/vtp')
-        os.makedirs(train_path+'/raw')
+    # create dirs if not exist (no exception if exist)
+    os.makedirs(train_path, exist_ok=True)
+    os.makedirs(train_path + 'seg', exist_ok=True)
+    os.makedirs(train_path + 'vtp', exist_ok=True)
+    os.makedirs(train_path + 'raw', exist_ok=True)
+
+    # decide resume point
+    if ck and ck.get("stage") == "train":
+        start_stage = "train"
+        start_index = int(ck.get("index", 0)) + 1
+        image_id = int(ck.get("image_id", infer_image_id_from_folder(train_path)))
+        print(f"🔁 Resuming TRAIN from index {start_index}, image_id {image_id}")
     else:
-        raise Exception("Train folder is non-empty")
+        start_stage = "train"
+        start_index = 0
+        # if folder has previous images infer next image id
+        image_id = infer_image_id_from_folder(train_path)
+        if start_index == 0 and image_id > 1:
+            print(f"ℹ️ Found existing train data, will skip existing saved patches and continue with image_id={image_id}")
+
     print('Preparing Train Data')
 
     raw_files = []
@@ -264,60 +353,90 @@ if __name__ == "__main__":
         raw_files.append(root_dir + "/region_%d_sat" % ind)
         seg_files.append(root_dir + "/region_%d_gt.png" % ind)
         vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
-        
-    for ind in range(len(raw_files)):
+
+    # main train loop (resuming support)
+    for ind in range(start_index, len(raw_files)):
         print(ind)
         try:
-            sat_img = imageio.imread(raw_files[ind]+".png")
-        except:
-            sat_img = imageio.imread(raw_files[ind]+".jpg")
+            try:
+                sat_img = imageio.imread(raw_files[ind]+".png")
+            except:
+                sat_img = imageio.imread(raw_files[ind]+".jpg")
+        except FileNotFoundError:
+            print(f"[WARN] input image missing: {raw_files[ind]}")
+            continue
 
-        with open(vtk_files[ind], 'rb') as f:
-            graph = pickle.load(f)
+        try:
+            with open(vtk_files[ind], 'rb') as f:
+                graph = pickle.load(f)
+        except FileNotFoundError:
+            print(f"[WARN] vtk file missing: {vtk_files[ind]}")
+            continue
+
         node_array, edge_array = convert_graph(graph)
-
         gt_seg = imageio.imread(seg_files[ind])
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
         patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
         mesh.lines = patch_edge.flatten()
 
+        # run extraction (this will call save_input that writes files)
         patch_extract(train_path, sat_img, gt_seg, mesh)
 
-    
-    image_id = 1
+        # بعد از تکمیل پردازش یک region، ذخیره checkpoint
+        save_checkpoint("train", ind, image_id)
+
+    # -------------------------
+    # TEST stage
+    # -------------------------
     test_path = './data/20cities/test_data/'
-    if not os.path.isdir(test_path):
-        os.makedirs(test_path)
-        os.makedirs(test_path+'/seg')
-        os.makedirs(test_path+'/vtp')
-        os.makedirs(test_path+'/raw')
+    os.makedirs(test_path, exist_ok=True)
+    os.makedirs(test_path + 'seg', exist_ok=True)
+    os.makedirs(test_path + 'vtp', exist_ok=True)
+    os.makedirs(test_path + 'raw', exist_ok=True)
+
+    if ck and ck.get("stage") == "test":
+        start_stage = "test"
+        start_index = int(ck.get("index", 0)) + 1
+        image_id = int(ck.get("image_id", infer_image_id_from_folder(test_path)))
+        print(f"🔁 Resuming TEST from index {start_index}, image_id {image_id}")
     else:
-        raise Exception("Test folder is non-empty")
+        start_stage = "test"
+        start_index = 0
+        # if folder has previous images infer next image id
+        image_id = infer_image_id_from_folder(test_path)
+        if start_index == 0 and image_id > 1:
+            print(f"ℹ️ Found existing test data, will skip existing saved patches and continue with image_id={image_id}")
 
     print('Preparing Test Data')
 
     raw_files = []
     seg_files = []
     vtk_files = []
-
     for ind in indrange_test:
         raw_files.append(root_dir + "/region_%d_sat" % ind)
         seg_files.append(root_dir + "/region_%d_gt.png" % ind)
         vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
-        
-        
-    for ind in range(len(raw_files)):
+
+    for ind in range(start_index, len(raw_files)):
         print(ind)
         try:
-            sat_img = imageio.imread(raw_files[ind]+".png")
-        except:
-            sat_img = imageio.imread(raw_files[ind]+".jpg")
+            try:
+                sat_img = imageio.imread(raw_files[ind]+".png")
+            except:
+                sat_img = imageio.imread(raw_files[ind]+".jpg")
+        except FileNotFoundError:
+            print(f"[WARN] input image missing: {raw_files[ind]}")
+            continue
 
-        with open(vtk_files[ind], 'rb') as f:
-            graph = pickle.load(f)
+        try:
+            with open(vtk_files[ind], 'rb') as f:
+                graph = pickle.load(f)
+        except FileNotFoundError:
+            print(f"[WARN] vtk file missing: {vtk_files[ind]}")
+            continue
+
         node_array, edge_array = convert_graph(graph)
-
         gt_seg = imageio.imread(seg_files[ind])
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
@@ -325,3 +444,14 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
+
+        # save checkpoint after each region done
+        save_checkpoint("test", ind, image_id)
+
+    # پایان: حذف checkpoint و اطلاع
+    try:
+        if os.path.exists(CHECKPOINT_FILE):
+            os.remove(CHECKPOINT_FILE)
+            print("🎉 All data generated — checkpoint cleared.")
+    except Exception as e:
+        print(f"[WARN] could not remove checkpoint: {e}")
