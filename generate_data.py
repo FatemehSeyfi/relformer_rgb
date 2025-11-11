@@ -295,148 +295,96 @@ def infer_image_id_from_folder(folder):
         print(f"[WARN] infer_image_id error: {e}")
         return 1
 
+import json
+
 if __name__ == "__main__":
     root_dir = "./data/20cities/"
+    checkpoint_file = "./data/checkpoint.json"
 
-    # load checkpoint if exists
-    ck = load_checkpoint()
-    # default start values
-    start_stage = None
-    start_index = None
+    # اگر چک‌پوینت وجود داره، مقدار قبلی رو بخون
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, 'r') as f:
+            checkpoint = json.load(f)
+        start_train = checkpoint.get("train_index", 0)
+        start_test = checkpoint.get("test_index", 0)
+        phase = checkpoint.get("phase", "train")
+        print(f"🔄 Resuming from {phase} index {start_train if phase=='train' else start_test}")
+    else:
+        checkpoint = {}
+        start_train = 0
+        start_test = 0
+        phase = "train"
+
     image_id = 1
 
-    # prepare index ranges (same as original)
-    indrange_train = []
-    indrange_test = []
-
-    for x in range(180):
-        if x % 10 < 8 :
-            indrange_train.append(x)
-        if x % 10 == 9:
-            indrange_test.append(x)
-        if x % 20 == 18:
-            indrange_train.append(x)
-        if x % 20 == 8:
-            indrange_test.append(x)
-
-    # -------------------------
-    # TRAIN stage
-    # -------------------------
+    # ----------------- TRAIN DATA -----------------
     train_path = './data/20cities/train_data/'
-    # create dirs if not exist (no exception if exist)
-    os.makedirs(train_path, exist_ok=True)
-    os.makedirs(train_path + 'seg', exist_ok=True)
-    os.makedirs(train_path + 'vtp', exist_ok=True)
-    os.makedirs(train_path + 'raw', exist_ok=True)
-
-    # decide resume point
-    if ck and ck.get("stage") == "train":
-        start_stage = "train"
-        start_index = int(ck.get("index", 0)) + 1
-        image_id = int(ck.get("image_id", infer_image_id_from_folder(train_path)))
-        print(f"🔁 Resuming TRAIN from index {start_index}, image_id {image_id}")
-    else:
-        start_stage = "train"
-        start_index = 0
-        # if folder has previous images infer next image id
-        image_id = infer_image_id_from_folder(train_path)
-        if start_index == 0 and image_id > 1:
-            print(f"ℹ️ Found existing train data, will skip existing saved patches and continue with image_id={image_id}")
-
+    if not os.path.isdir(train_path):
+        os.makedirs(train_path+'/seg', exist_ok=True)
+        os.makedirs(train_path+'/vtp', exist_ok=True)
+        os.makedirs(train_path+'/raw', exist_ok=True)
     print('Preparing Train Data')
 
-    raw_files = []
-    seg_files = []
-    vtk_files = []
+    raw_files = [f"{root_dir}/region_{ind}_sat" for ind in indrange_train]
+    seg_files = [f"{root_dir}/region_{ind}_gt.png" for ind in indrange_train]
+    vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_train]
 
-    for ind in indrange_train:
-        raw_files.append(root_dir + "/region_%d_sat" % ind)
-        seg_files.append(root_dir + "/region_%d_gt.png" % ind)
-        vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
-
-    # main train loop (resuming support)
-    for ind in range(start_index, len(raw_files)):
-        print(ind)
-        try:
+    # اگر قبلاً train تموم شده بود، از test شروع کن
+    if phase == "train":
+        for ind in range(start_train, len(raw_files)):
+            print(f"Train index {ind}/{len(raw_files)}")
             try:
                 sat_img = imageio.imread(raw_files[ind]+".png")
             except:
                 sat_img = imageio.imread(raw_files[ind]+".jpg")
-        except FileNotFoundError:
-            print(f"[WARN] input image missing: {raw_files[ind]}")
-            continue
 
-        try:
             with open(vtk_files[ind], 'rb') as f:
                 graph = pickle.load(f)
-        except FileNotFoundError:
-            print(f"[WARN] vtk file missing: {vtk_files[ind]}")
-            continue
+            node_array, edge_array = convert_graph(graph)
 
-        node_array, edge_array = convert_graph(graph)
-        gt_seg = imageio.imread(seg_files[ind])
-        patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
-        mesh = pyvista.PolyData(patch_coord)
-        patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
-        mesh.lines = patch_edge.flatten()
+            gt_seg = imageio.imread(seg_files[ind])
+            patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
+            mesh = pyvista.PolyData(patch_coord)
+            patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
+            mesh.lines = patch_edge.flatten()
 
-        # run extraction (this will call save_input that writes files)
-        patch_extract(train_path, sat_img, gt_seg, mesh)
+            patch_extract(train_path, sat_img, gt_seg, mesh)
 
-        # بعد از تکمیل پردازش یک region، ذخیره checkpoint
-        save_checkpoint("train", ind, image_id)
+            # ✅ ذخیره چک‌پوینت بعد از هر مرحله
+            checkpoint = {"phase": "train", "train_index": ind+1, "test_index": 0}
+            with open(checkpoint_file, 'w') as f:
+                json.dump(checkpoint, f)
 
-    # -------------------------
-    # TEST stage
-    # -------------------------
+        # بعد از اتمام train، برو سراغ test
+        phase = "test"
+        checkpoint = {"phase": "test", "train_index": len(raw_files), "test_index": 0}
+        with open(checkpoint_file, 'w') as f:
+            json.dump(checkpoint, f)
+
+    # ----------------- TEST DATA -----------------
+    image_id = 1
     test_path = './data/20cities/test_data/'
-    os.makedirs(test_path, exist_ok=True)
-    os.makedirs(test_path + 'seg', exist_ok=True)
-    os.makedirs(test_path + 'vtp', exist_ok=True)
-    os.makedirs(test_path + 'raw', exist_ok=True)
-
-    if ck and ck.get("stage") == "test":
-        start_stage = "test"
-        start_index = int(ck.get("index", 0)) + 1
-        image_id = int(ck.get("image_id", infer_image_id_from_folder(test_path)))
-        print(f"🔁 Resuming TEST from index {start_index}, image_id {image_id}")
-    else:
-        start_stage = "test"
-        start_index = 0
-        # if folder has previous images infer next image id
-        image_id = infer_image_id_from_folder(test_path)
-        if start_index == 0 and image_id > 1:
-            print(f"ℹ️ Found existing test data, will skip existing saved patches and continue with image_id={image_id}")
-
+    if not os.path.isdir(test_path):
+        os.makedirs(test_path+'/seg', exist_ok=True)
+        os.makedirs(test_path+'/vtp', exist_ok=True)
+        os.makedirs(test_path+'/raw', exist_ok=True)
     print('Preparing Test Data')
 
-    raw_files = []
-    seg_files = []
-    vtk_files = []
-    for ind in indrange_test:
-        raw_files.append(root_dir + "/region_%d_sat" % ind)
-        seg_files.append(root_dir + "/region_%d_gt.png" % ind)
-        vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
+    raw_files = [f"{root_dir}/region_{ind}_sat" for ind in indrange_test]
+    seg_files = [f"{root_dir}/region_{ind}_gt.png" for ind in indrange_test]
+    vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_test]
 
-    for ind in range(start_index, len(raw_files)):
-        print(ind)
+    for ind in range(start_test, len(raw_files)):
+        print(f"Test index {ind}/{len(raw_files)}")
         try:
-            try:
-                sat_img = imageio.imread(raw_files[ind]+".png")
-            except:
-                sat_img = imageio.imread(raw_files[ind]+".jpg")
-        except FileNotFoundError:
-            print(f"[WARN] input image missing: {raw_files[ind]}")
-            continue
+            sat_img = imageio.imread(raw_files[ind]+".png")
+        except:
+            sat_img = imageio.imread(raw_files[ind]+".jpg")
 
-        try:
-            with open(vtk_files[ind], 'rb') as f:
-                graph = pickle.load(f)
-        except FileNotFoundError:
-            print(f"[WARN] vtk file missing: {vtk_files[ind]}")
-            continue
-
+        with open(vtk_files[ind], 'rb') as f:
+            graph = pickle.load(f)
         node_array, edge_array = convert_graph(graph)
+
         gt_seg = imageio.imread(seg_files[ind])
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
@@ -445,13 +393,11 @@ if __name__ == "__main__":
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
 
-        # save checkpoint after each region done
-        save_checkpoint("test", ind, image_id)
+        # ✅ ذخیره چک‌پوینت بعد از هر مرحله
+        checkpoint = {"phase": "test", "train_index": len(indrange_train), "test_index": ind+1}
+        with open(checkpoint_file, 'w') as f:
+            json.dump(checkpoint, f)
 
-    # پایان: حذف checkpoint و اطلاع
-    try:
-        if os.path.exists(CHECKPOINT_FILE):
-            os.remove(CHECKPOINT_FILE)
-            print("🎉 All data generated — checkpoint cleared.")
-    except Exception as e:
-        print(f"[WARN] could not remove checkpoint: {e}")
+    print("✅ All done! Cleaning checkpoint...")
+    os.remove(checkpoint_file)
+(f"[WARN] could not remove checkpoint: {e}")
