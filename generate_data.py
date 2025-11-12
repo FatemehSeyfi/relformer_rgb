@@ -6,6 +6,23 @@ import numpy as np
 import pickle
 import random
 import os
+import json
+
+checkpoint_path = "/content/drive/MyDrive/relformer_data/checkpoint.json"
+
+# اگر فایل چک‌پوینت وجود دارد، آن را بخوان
+if os.path.exists(checkpoint_path):
+    with open(checkpoint_path, "r") as f:
+        checkpoint = json.load(f)
+    phase = checkpoint.get("phase", "train")
+    start_train = checkpoint.get("train_index", 0)
+    start_test = checkpoint.get("test_index", 0)
+else:
+    checkpoint = {"phase": "train", "train_index": 0, "test_index": 0}
+    phase = "train"
+    start_train = 0
+    start_test = 0
+
 
 patch_size = [128,128,1]
 pad = [5,5,0]
@@ -330,36 +347,40 @@ if __name__ == "__main__":
     vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_train]
 
     # اگر قبلاً train تموم شده بود، از test شروع کن
-    if phase == "train":
-        for ind in range(start_train, len(raw_files)):
-            print(f"Train index {ind}/{len(raw_files)}")
-            try:
-                sat_img = imageio.imread(raw_files[ind]+".png")
-            except:
-                sat_img = imageio.imread(raw_files[ind]+".jpg")
+  if phase == "train":
+    for ind in range(start_train, len(raw_files)):
+        print(f"Processing train index {ind}")
+        try:
+            sat_img = imageio.imread(raw_files[ind]+".png")
+        except:
+            sat_img = imageio.imread(raw_files[ind]+".jpg")
 
-            with open(vtk_files[ind], 'rb') as f:
-                graph = pickle.load(f)
-            node_array, edge_array = convert_graph(graph)
+        with open(vtk_files[ind], 'rb') as f:
+            graph = pickle.load(f)
+        node_array, edge_array = convert_graph(graph)
+        gt_seg = imageio.imread(seg_files[ind])
 
-            gt_seg = imageio.imread(seg_files[ind])
-            patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
-            mesh = pyvista.PolyData(patch_coord)
-            patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
-            mesh.lines = patch_edge.flatten()
+        patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
+        mesh = pyvista.PolyData(patch_coord)
+        patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
+        mesh.lines = patch_edge.flatten()
 
-            patch_extract(train_path, sat_img, gt_seg, mesh)
+        patch_extract(train_path, sat_img, gt_seg, mesh)
 
-            # ✅ ذخیره چک‌پوینت بعد از هر مرحله
-            checkpoint = {"phase": "train", "train_index": ind+1, "test_index": 0}
-            with open(checkpoint_file, 'w') as f:
-                json.dump(checkpoint, f)
-
-        # بعد از اتمام train، برو سراغ test
-        phase = "test"
-        checkpoint = {"phase": "test", "train_index": len(raw_files), "test_index": 0}
-        with open(checkpoint_file, 'w') as f:
+        # ✅ ذخیره چک‌پوینت بعد از هر مرحله
+        checkpoint["phase"] = "train"
+        checkpoint["train_index"] = ind + 1
+        with open(checkpoint_path, "w") as f:
             json.dump(checkpoint, f)
+
+    # بعد از اتمام train، برو سراغ test
+    checkpoint["phase"] = "test"
+    checkpoint["train_index"] = len(raw_files)
+    checkpoint["test_index"] = 0
+    with open(checkpoint_path, "w") as f:
+        json.dump(checkpoint, f)
+    phase = "test"
+
 
     # ----------------- TEST DATA -----------------
     image_id = 1
@@ -374,8 +395,10 @@ if __name__ == "__main__":
     seg_files = [f"{root_dir}/region_{ind}_gt.png" for ind in indrange_test]
     vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_test]
 
+    start_idx = checkpoint.get("test_index", 0) if phase == "test" else 0
+    if phase == "test":
     for ind in range(start_test, len(raw_files)):
-        print(f"Test index {ind}/{len(raw_files)}")
+        print(f"Processing test index {ind}")
         try:
             sat_img = imageio.imread(raw_files[ind]+".png")
         except:
@@ -384,8 +407,8 @@ if __name__ == "__main__":
         with open(vtk_files[ind], 'rb') as f:
             graph = pickle.load(f)
         node_array, edge_array = convert_graph(graph)
-
         gt_seg = imageio.imread(seg_files[ind])
+
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
         patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
@@ -394,8 +417,9 @@ if __name__ == "__main__":
         patch_extract(test_path, sat_img, gt_seg, mesh)
 
         # ✅ ذخیره چک‌پوینت بعد از هر مرحله
-        checkpoint = {"phase": "test", "train_index": len(indrange_train), "test_index": ind+1}
-        with open(checkpoint_file, 'w') as f:
+        checkpoint["phase"] = "test"
+        checkpoint["test_index"] = ind + 1
+        with open(checkpoint_path, "w") as f:
             json.dump(checkpoint, f)
 
     print("✅ All done! Cleaning checkpoint...")
