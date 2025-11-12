@@ -6,23 +6,6 @@ import numpy as np
 import pickle
 import random
 import os
-import json
-
-checkpoint_path = "/content/drive/MyDrive/relformer_data/checkpoint.json"
-
-# اگر فایل چک‌پوینت وجود دارد، آن را بخوان
-if os.path.exists(checkpoint_path):
-    with open(checkpoint_path, "r") as f:
-        checkpoint = json.load(f)
-    phase = checkpoint.get("phase", "train")
-    start_train = checkpoint.get("train_index", 0)
-    start_test = checkpoint.get("test_index", 0)
-else:
-    checkpoint = {"phase": "train", "train_index": 0, "test_index": 0}
-    phase = "train"
-    start_train = 0
-    start_test = 0
-
 
 patch_size = [128,128,1]
 pad = [5,5,0]
@@ -259,97 +242,31 @@ for x in range(180):
     if x % 20 == 8:
         indrange_test.append(x)
 
-# ---------------------------
-# Resume-safe main (replace original main with this block)
-# ---------------------------
-import pickle
-from pathlib import Path
-
-CHECKPOINT_FILE = "/content/drive/MyDrive/relformer_data/generate_checkpoint.pkl"
-
-def save_checkpoint(stage, data_index, image_id):
-    ck = {"stage": stage, "index": int(data_index), "image_id": int(image_id)}
-    try:
-        os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
-        with open(CHECKPOINT_FILE, "wb") as f:
-            pickle.dump(ck, f)
-    except Exception as e:
-        print(f"[WARN] could not save checkpoint: {e}")
-
-def load_checkpoint():
-    if os.path.exists(CHECKPOINT_FILE):
-        try:
-            with open(CHECKPOINT_FILE, "rb") as f:
-                ck = pickle.load(f)
-                return ck
-        except Exception as e:
-            print(f"[WARN] could not load checkpoint: {e}")
-            return None
-    return None
-
-def infer_image_id_from_folder(folder):
-    """اگر image_id قبلاً ساخته شده، از بزرگترین شماره فایل‌های raw استخراج کن."""
-    try:
-        p = Path(folder) / "raw"
-        if not p.exists():
-            return 1
-        files = list(p.glob("sample_*_data.png")) + list(p.glob("sample_*.png"))
-        if not files:
-            return 1
-        # پارس کردن شماره‌ها از نام فایل sample_000001_data.png
-        idxs = []
-        for f in files:
-            name = f.stem  # sample_000001_data
-            parts = name.split('_')
-            for part in parts:
-                if part.isdigit():
-                    idxs.append(int(part))
-                    break
-        if not idxs:
-            return 1
-        return max(idxs) + 1
-    except Exception as e:
-        print(f"[WARN] infer_image_id error: {e}")
-        return 1
-
-import json
-
 if __name__ == "__main__":
     root_dir = "./data/20cities/"
-    checkpoint_file = "./data/checkpoint.json"
-
-    # اگر چک‌پوینت وجود داره، مقدار قبلی رو بخون
-    if os.path.exists(checkpoint_file):
-        with open(checkpoint_file, 'r') as f:
-            checkpoint = json.load(f)
-        start_train = checkpoint.get("train_index", 0)
-        start_test = checkpoint.get("test_index", 0)
-        phase = checkpoint.get("phase", "train")
-        print(f"🔄 Resuming from {phase} index {start_train if phase=='train' else start_test}")
-    else:
-        checkpoint = {}
-        start_train = 0
-        start_test = 0
-        phase = "train"
 
     image_id = 1
-
-    # ----------------- TRAIN DATA -----------------
     train_path = './data/20cities/train_data/'
     if not os.path.isdir(train_path):
-        os.makedirs(train_path+'/seg', exist_ok=True)
-        os.makedirs(train_path+'/vtp', exist_ok=True)
-        os.makedirs(train_path+'/raw', exist_ok=True)
+        os.makedirs(train_path)
+        os.makedirs(train_path+'/seg')
+        os.makedirs(train_path+'/vtp')
+        os.makedirs(train_path+'/raw')
+    else:
+        raise Exception("Train folder is non-empty")
     print('Preparing Train Data')
 
-    raw_files = [f"{root_dir}/region_{ind}_sat" for ind in indrange_train]
-    seg_files = [f"{root_dir}/region_{ind}_gt.png" for ind in indrange_train]
-    vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_train]
+    raw_files = []
+    seg_files = []
+    vtk_files = []
 
-    # اگر قبلاً train تموم شده بود، از test شروع کن
-    if phase == "train":
-    for ind in range(start_train, len(raw_files)):
-        print(f"Processing train index {ind}")
+    for ind in indrange_train:
+        raw_files.append(root_dir + "/region_%d_sat" % ind)
+        seg_files.append(root_dir + "/region_%d_gt.png" % ind)
+        vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
+        
+    for ind in range(len(raw_files)):
+        print(ind)
         try:
             sat_img = imageio.imread(raw_files[ind]+".png")
         except:
@@ -358,8 +275,8 @@ if __name__ == "__main__":
         with open(vtk_files[ind], 'rb') as f:
             graph = pickle.load(f)
         node_array, edge_array = convert_graph(graph)
-        gt_seg = imageio.imread(seg_files[ind])
 
+        gt_seg = imageio.imread(seg_files[ind])
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
         patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
@@ -367,38 +284,31 @@ if __name__ == "__main__":
 
         patch_extract(train_path, sat_img, gt_seg, mesh)
 
-        # ✅ ذخیره چک‌پوینت بعد از هر مرحله
-        checkpoint["phase"] = "train"
-        checkpoint["train_index"] = ind + 1
-        with open(checkpoint_path, "w") as f:
-            json.dump(checkpoint, f)
-
-    # بعد از اتمام train، برو سراغ test
-    checkpoint["phase"] = "test"
-    checkpoint["train_index"] = len(raw_files)
-    checkpoint["test_index"] = 0
-    with open(checkpoint_path, "w") as f:
-        json.dump(checkpoint, f)
-    phase = "test"
-
-
-    # ----------------- TEST DATA -----------------
+    
     image_id = 1
     test_path = './data/20cities/test_data/'
     if not os.path.isdir(test_path):
-        os.makedirs(test_path+'/seg', exist_ok=True)
-        os.makedirs(test_path+'/vtp', exist_ok=True)
-        os.makedirs(test_path+'/raw', exist_ok=True)
+        os.makedirs(test_path)
+        os.makedirs(test_path+'/seg')
+        os.makedirs(test_path+'/vtp')
+        os.makedirs(test_path+'/raw')
+    else:
+        raise Exception("Test folder is non-empty")
+
     print('Preparing Test Data')
 
-    raw_files = [f"{root_dir}/region_{ind}_sat" for ind in indrange_test]
-    seg_files = [f"{root_dir}/region_{ind}_gt.png" for ind in indrange_test]
-    vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_test]
+    raw_files = []
+    seg_files = []
+    vtk_files = []
 
-    start_idx = checkpoint.get("test_index", 0) if phase == "test" else 0
-    if phase == "test":
-    for ind in range(start_test, len(raw_files)):
-        print(f"Processing test index {ind}")
+    for ind in indrange_test:
+        raw_files.append(root_dir + "/region_%d_sat" % ind)
+        seg_files.append(root_dir + "/region_%d_gt.png" % ind)
+        vtk_files.append(root_dir + "/region_%d_refine_gt_graph.p" % ind)
+        
+        
+    for ind in range(len(raw_files)):
+        print(ind)
         try:
             sat_img = imageio.imread(raw_files[ind]+".png")
         except:
@@ -407,8 +317,8 @@ if __name__ == "__main__":
         with open(vtk_files[ind], 'rb') as f:
             graph = pickle.load(f)
         node_array, edge_array = convert_graph(graph)
-        gt_seg = imageio.imread(seg_files[ind])
 
+        gt_seg = imageio.imread(seg_files[ind])
         patch_coord = np.concatenate((node_array, np.int32(np.zeros((node_array.shape[0],1)))), 1)
         mesh = pyvista.PolyData(patch_coord)
         patch_edge = np.concatenate((np.int32(2*np.ones((edge_array.shape[0],1))), edge_array), 1)
@@ -416,12 +326,3 @@ if __name__ == "__main__":
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
 
-        # ✅ ذخیره چک‌پوینت بعد از هر مرحله
-        checkpoint["phase"] = "test"
-        checkpoint["test_index"] = ind + 1
-        with open(checkpoint_path, "w") as f:
-            json.dump(checkpoint, f)
-
-    print("✅ All done! Cleaning checkpoint...")
-    os.remove(checkpoint_file)
-(f"[WARN] could not remove checkpoint: {e}")
