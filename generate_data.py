@@ -347,7 +347,7 @@ if __name__ == "__main__":
     vtk_files = [f"{root_dir}/region_{ind}_refine_gt_graph.p" for ind in indrange_train]
 
     # اگر قبلاً train تموم شده بود، از test شروع کن
-  if phase == "train":
+    if phase == "train":
     for ind in range(start_train, len(raw_files)):
         print(f"Processing train index {ind}")
         try:
