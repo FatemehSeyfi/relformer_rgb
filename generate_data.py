@@ -252,14 +252,8 @@ if __name__ == "__main__":
         os.makedirs(train_path+'/seg')
         os.makedirs(train_path+'/vtp')
         os.makedirs(train_path+'/raw')
-    if not os.path.isdir(train_path):
-        os.makedirs(train_path)
-        os.makedirs(train_path+'/seg')
-        os.makedirs(train_path+'/vtp')
-        os.makedirs(train_path+'/raw')
-# else:
-#     raise Exception("Train folder is non-empty")
-
+    else:
+        raise Exception("Train folder is non-empty")
     print('Preparing Train Data')
 
     raw_files = []
