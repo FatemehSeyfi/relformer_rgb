@@ -325,4 +325,3 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
-
