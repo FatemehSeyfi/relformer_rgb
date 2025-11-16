@@ -255,17 +255,15 @@ for x in range(180):
 if __name__ == "__main__":
     root_dir = "./data/20cities/"
 
-   train_path = './data/20cities/train_data/'
+    train_path = './data/20cities/train_data/'
+    os.makedirs(train_path, exist_ok=True)
+    os.makedirs(train_path+'/seg', exist_ok=True)
+    os.makedirs(train_path+'/vtp', exist_ok=True)
+    os.makedirs(train_path+'/raw', exist_ok=True)
 
-os.makedirs(train_path, exist_ok=True)
-os.makedirs(train_path+'/seg', exist_ok=True)
-os.makedirs(train_path+'/vtp', exist_ok=True)
-os.makedirs(train_path+'/raw', exist_ok=True)
-
-# RESUME
-image_id = get_last_index(train_path)
-print("Preparing Train Data — starting from image_id =", image_id)
-
+    # RESUME
+    image_id = get_last_index(train_path)
+    print("Preparing Train Data — starting from image_id =", image_id)
 
     raw_files = []
     seg_files = []
