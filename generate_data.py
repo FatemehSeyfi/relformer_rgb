@@ -269,6 +269,7 @@ if __name__ == "__main__":
     seg_files = []
     vtk_files = []
 
+
     for ind in indrange_train:
         raw_files.append(root_dir + "/region_%d_sat" % ind)
         seg_files.append(root_dir + "/region_%d_gt.png" % ind)
@@ -292,21 +293,19 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(train_path, sat_img, gt_seg, mesh)
-
+        print('Preparing Test Data')
     test_path = './data/20cities/test_data/'
+    os.makedirs(test_path, exist_ok=True)
+    os.makedirs(test_path+'/seg', exist_ok=True)
+    os.makedirs(test_path+'/vtp', exist_ok=True)
+    os.makedirs(test_path+'/raw', exist_ok=True)
 
-os.makedirs(test_path, exist_ok=True)
-os.makedirs(test_path+'/seg', exist_ok=True)
-os.makedirs(test_path+'/vtp', exist_ok=True)
-os.makedirs(test_path+'/raw', exist_ok=True)
-
-# RESUME
-image_id = get_last_index(test_path)
-print("Preparing Test Data — starting from image_id =", image_id)
+    # RESUME
+    image_id = get_last_index(test_path)
+    print("Preparing Test Data — starting from image_id =", image_id)
 
 
-    print('Preparing Test Data')
-
+    
     raw_files = []
     seg_files = []
     vtk_files = []
