@@ -6,16 +6,6 @@ import numpy as np
 import pickle
 import random
 import os
-def get_last_index(path):
-    raw_path = os.path.join(path, "raw")
-    if not os.path.exists(raw_path):
-        return 1
-    files = [f for f in os.listdir(raw_path) if f.endswith("_data.png")]
-    if len(files) == 0:
-        return 1
-    nums = [int(f.split("_")[1].split(".")[0]) for f in files]
-    return max(nums) + 1
-
 
 patch_size = [128,128,1]
 pad = [5,5,0]
@@ -255,20 +245,20 @@ for x in range(180):
 if __name__ == "__main__":
     root_dir = "./data/20cities/"
 
+    image_id = 1
     train_path = './data/20cities/train_data/'
-    os.makedirs(train_path, exist_ok=True)
-    os.makedirs(train_path+'/seg', exist_ok=True)
-    os.makedirs(train_path+'/vtp', exist_ok=True)
-    os.makedirs(train_path+'/raw', exist_ok=True)
-
-    # RESUME
-    image_id = get_last_index(train_path)
-    print("Preparing Train Data — starting from image_id =", image_id)
+    if not os.path.isdir(train_path):
+        os.makedirs(train_path)
+        os.makedirs(train_path+'/seg')
+        os.makedirs(train_path+'/vtp')
+        os.makedirs(train_path+'/raw')
+    else:
+        raise Exception("Train folder is non-empty")
+    print('Preparing Train Data')
 
     raw_files = []
     seg_files = []
     vtk_files = []
-
 
     for ind in indrange_train:
         raw_files.append(root_dir + "/region_%d_sat" % ind)
@@ -293,19 +283,20 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(train_path, sat_img, gt_seg, mesh)
-        print('Preparing Test Data')
-    test_path = './data/20cities/test_data/'
-    os.makedirs(test_path, exist_ok=True)
-    os.makedirs(test_path+'/seg', exist_ok=True)
-    os.makedirs(test_path+'/vtp', exist_ok=True)
-    os.makedirs(test_path+'/raw', exist_ok=True)
-
-    # RESUME
-    image_id = get_last_index(test_path)
-    print("Preparing Test Data — starting from image_id =", image_id)
-
 
     
+    image_id = 1
+    test_path = './data/20cities/test_data/'
+    if not os.path.isdir(test_path):
+        os.makedirs(test_path)
+        os.makedirs(test_path+'/seg')
+        os.makedirs(test_path+'/vtp')
+        os.makedirs(test_path+'/raw')
+    else:
+        raise Exception("Test folder is non-empty")
+
+    print('Preparing Test Data')
+
     raw_files = []
     seg_files = []
     vtk_files = []
@@ -334,3 +325,4 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
+
