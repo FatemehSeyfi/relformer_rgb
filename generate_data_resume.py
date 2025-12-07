@@ -208,7 +208,8 @@ for x in range(180):
 
 # --- Resume-Capable Main ---
 if __name__ == "__main__":
-    root_dir = "./data/20cities/"
+    root_dir = root_dir = "/content/drive/MyDrive/relformer_data/20cities"
+
 
     train_path = os.path.join(root_dir, "train_data")
     test_path = os.path.join(root_dir, "test_data")
@@ -264,3 +265,4 @@ if __name__ == "__main__":
         mesh.lines = patch_edge.flatten()
 
         patch_extract(test_path, sat_img, gt_seg, mesh)
+
